@@ -6,6 +6,11 @@
 - I tried reproducing these errors in a minimal example but didn't succeed.
 - I trained an agent using just one thread on 4 million frames, but it's hard to tell for me if it's working properly.
 
+## Next steps
+
+- Reproduce "Illegal Instruction!" errors in minimal example and find out how to fix.
+- Replace Atari environment with [Catch](https://github.com/OpenMined/CampX/) for faster experiments. Only try Atari once succeeded at Catch.
+
 ## Current status
 
 **I do not recommend reviewing the current code.** It currently doesn't work and isn't properly commented.
