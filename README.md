@@ -6,6 +6,10 @@
 - I tried reproducing these errors in a minimal example but didn't succeed.
 - I trained an agent using just one thread on 4 million frames, but it's hard to tell for me if it's working properly.
 
+![Value estimate and max prob of policy](https://github.com/maxmdaniel/a3c/blob/master/Max-prob_and_value.png)
+
+![Gradient norms and losses](https://github.com/maxmdaniel/a3c/blob/master/grad_norms_and_loss.png)
+
 ## Next steps
 
 - Reproduce "Illegal Instruction!" errors in minimal example and find out how to fix.
@@ -17,6 +21,9 @@
 
 - Running just a single thread works in principle and doesn't seem to immediately suffer from vanishing or exploding gradients, but I haven't yet tested the agent's performance after substantial training.
 - Runs so far exhibit intermittent periods of several ten-thousand frames where gradients are nearly zero and the agent constantly uses a uniformly random policy.
+
+![Value estimate and max probability of the policy](https://github.com/maxmdaniel/a3c/blob/master/random_periods.png)
+
 - When using multiple threads currently throws errors like "Illegal Instruction! 84"
 
 ## Goal
