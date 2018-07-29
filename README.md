@@ -1,8 +1,14 @@
 # Building an A3C agent using TensorFlow.
 
+## Update 2018-07-29
+
+- I wasn't able to fix the "Illegal Instruction!" errors.
+- I tried reproducing these errors in a minimal example but didn't succeed.
+- I trained an agent using just one thread on 4 million frames, but it's hard to tell for me if it's working properly.
+
 ## Current status
 
-**I do not recommend reviewing the current code.** It currently doesn't work, isn't properly commented, and I expect to make major updates over the coming 2 weeks.
+**I do not recommend reviewing the current code.** It currently doesn't work and isn't properly commented.
 
 - Running just a single thread works in principle and doesn't seem to immediately suffer from vanishing or exploding gradients, but I haven't yet tested the agent's performance after substantial training.
 - Runs so far exhibit intermittent periods of several ten-thousand frames where gradients are nearly zero and the agent constantly uses a uniformly random policy.

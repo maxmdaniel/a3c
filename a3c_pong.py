@@ -75,26 +75,27 @@ class Net():
 
             # Create layers shared by actor and critic.
             with tf.variable_scope("shared"):
-                conv1 = tf.layers.conv2d(self.observations, 16, 8, strides=4,
-                                         padding="same",
-                                         activation=tf.nn.relu,
-                                         name="conv1")
-                conv2 = tf.layers.conv2d(conv1, 32, 4, strides=2,
-                                         padding="same",
-                                         activation=tf.nn.relu,
-                                         name="conv2")
-                fc = tf.layers.dense(tf.layers.flatten(conv2), 256,
-                                     activation=tf.nn.relu, name="fc")
+                self.conv1 = tf.layers.conv2d(self.observations, 16,
+                                              8, strides=4, padding="same",
+                                              activation=tf.nn.relu,
+                                              name="conv1")
+                self.conv2 = tf.layers.conv2d(self.conv1, 32, 4,
+                                              strides=2, padding="same",
+                                              activation=tf.nn.relu,
+                                              name="conv2")
+                self.fc = tf.layers.dense(tf.layers.flatten(self.conv2),
+                                          256, activation=tf.nn.relu,
+                                          name="fc")
             # Create actor output layer.
             with tf.variable_scope("actor"):
-                self.policy = tf.layers.dense(fc, n_actions,
+                self.policy = tf.layers.dense(self.fc, n_actions,
                                               activation=tf.nn.softmax,
                                               name="policy")
                 self.p_max = tf.summary.scalar("p_max",
                                                tf.reduce_max(self.policy))
             # Create critic output layer.
             with tf.variable_scope("critic"):
-                self.value = tf.layers.dense(fc, 1, name="value")
+                self.value = tf.layers.dense(self.fc, 1, name="value")
                 self.value_log = tf.summary.scalar("value",
                                                    tf.reduce_mean(self.value))
 
@@ -109,49 +110,54 @@ class Net():
         self.critic_params = tf.get_collection("critic_params", scope=scope)
 
         # Create operations for backpropagation.
-        #
-        # The 0.5 factor in loss_value was used in the A3C paper, see:
-        # https://github.com/muupan/async-rl/wiki
         with tf.variable_scope(scope):
-            policy_clipped = tf.clip_by_value(self.policy, 1e-20, 1.0)
-            self.entropy = - tf.reduce_sum(policy_clipped *
-                                           tf.log(policy_clipped)) / tf.log(2.)
-
-            relevant_probs = tf.reduce_sum(
+            self.policy_clipped = tf.clip_by_value(self.policy, 1e-20, 1.0)
+            self.entropy = - tf.reduce_sum(
+                self.policy_clipped * tf.log(self.policy_clipped)
+            ) / tf.log(2.)
+            self.relevant_probs = tf.reduce_sum(
                 self.policy * tf.one_hot(self.actions, n_actions,
                                          dtype=tf.float32),
                 axis=1
             )
-            advantage = self.returns - self.value
+            self.advantage = self.returns - self.value
             # Enforcing a strictly positive lower bound for relevant_probs
             # was necessary to avoid log(0) computations and warnings like:
             # "RuntimeWarning: invalid value encountered in less
             #  a = np.random.choice(self.env.action_space.n, p=policy[0])".
             # Fix found at:
             # https://github.com/awjuliani/DeepRL-Agents/issues/27
-            loss_actor = - tf.reduce_sum(
-                tf.log(tf.clip_by_value(relevant_probs, 1e-20, 1)) * advantage
+            self.loss_actor = - tf.reduce_sum(
+                tf.log(tf.clip_by_value(self.relevant_probs, 1e-20, 1))
+                * self.advantage
             ) - self.beta * self.entropy
-            loss_critic = 0.5 * tf.reduce_sum(tf.square(advantage))
-            grads_actor = tf.gradients(loss_actor, self.actor_params)
-            grads_critic = tf.gradients(loss_critic, self.critic_params)
+            self.loss_actor_log = tf.summary.scalar("loss_actor",
+                                                    self.loss_actor)
+            # The 0.5 factor in loss_value was used in the A3C paper, see:
+            # https://github.com/muupan/async-rl/wiki
+            self.loss_critic = 0.5 * tf.reduce_sum(tf.square(self.advantage))
+            self.loss_critic_log = tf.summary.scalar("loss_critic",
+                                                     self.loss_critic)
+            self.grads_actor = tf.gradients(self.loss_actor, self.actor_params)
+            self.grads_critic = tf.gradients(self.loss_critic,
+                                             self.critic_params)
             # Monitor gradient norms to detect vanishing or exploding
             # gradients.
             self.grad_norm_actor = tf.summary.scalar(
                 "grad_norm_actor",
-                tf.global_norm(grads_actor)
+                tf.global_norm(self.grads_actor)
             )
             self.grad_norm_critic = tf.summary.scalar(
                 "grad_norm_critic",
-                tf.global_norm(grads_critic)
+                tf.global_norm(self.grads_critic)
             )
             self.update_actor = Net.optimizer.apply_gradients(
-                zip(grads_actor, tf.get_collection("actor_params",
-                                                   scope="global"))
+                zip(self.grads_actor, tf.get_collection("actor_params",
+                                                        scope="global"))
             )
             self.update_critic = Net.optimizer.apply_gradients(
-                zip(grads_critic, tf.get_collection("critic_params",
-                                                    scope="global"))
+                zip(self.grads_critic, tf.get_collection("critic_params",
+                                                         scope="global"))
                 )
 
     # TODO: Make handling of single input frame vs batch style guide compliant.
@@ -176,7 +182,9 @@ class Worker(Net):
         self.writer = tf.summary.FileWriter("/tmp/a3c/" + scope)
         self.merged = tf.summary.merge([self.p_max, self.value_log,
                                         self.grad_norm_actor,
-                                        self.grad_norm_critic])
+                                        self.grad_norm_critic,
+                                        self.loss_actor_log,
+                                        self.loss_critic_log])
 
         """Process Atari frame as in Mnih et al. (2015).
 
@@ -189,15 +197,16 @@ class Worker(Net):
             `Tensor` of shape (batch_size, 84, 84, 1),
             resized greyscale version of input `frame`.
         """
-        self.frame = tf.placeholder(tf.float32, shape=[210, 160, 3])
-        frame = tf.convert_to_tensor(self.frame)
-        frame = tf.image.resize_images(frame, (110, 84))
-        frame = tf.image.rgb_to_grayscale(frame)
-        frame = tf.image.crop_to_bounding_box(frame, offset_height=13,
-                                              offset_width=0,
-                                              target_height=84,
-                                              target_width=84)
-        self.preprocess = tf.reshape(frame, [-1, 84, 84, 1])
+        self.frame_in = tf.placeholder(tf.float32, shape=[210, 160, 3])
+        self.frame = tf.convert_to_tensor(self.frame_in)
+        self.frame = tf.image.resize_images(self.frame, (110, 84))
+        self.frame = tf.image.rgb_to_grayscale(self.frame)
+        self.frame = tf.image.crop_to_bounding_box(self.frame,
+                                                   offset_height=13,
+                                                   offset_width=0,
+                                                   target_height=84,
+                                                   target_width=84)
+        self.preprocess = tf.reshape(self.frame, [-1, 84, 84, 1])
 
         # Synchronize thread-specific parameters.
         local_vars = tf.trainable_variables(self.scope)
@@ -212,7 +221,7 @@ class Worker(Net):
         if initial_obs is None:
             s_raw = self.env.reset()
             initial_obs = sess.run(self.preprocess,
-                                   feed_dict={self.frame: s_raw})
+                                   feed_dict={self.frame_in: s_raw})
 
         observations = np.zeros([steps, 84, 84, 1])
         actions = np.zeros(steps, dtype=int)
@@ -228,7 +237,7 @@ class Worker(Net):
             a = np.random.choice(self.env.action_space.n, p=policy[0])
             s_raw, r, done, info = self.env.step(a)
             self.score += r
-            s = sess.run(self.preprocess, feed_dict={self.frame: s_raw})
+            s = sess.run(self.preprocess, feed_dict={self.frame_in: s_raw})
             actions[t_local] = a
             rewards[t_local] = r
             t_local += 1
@@ -270,7 +279,7 @@ class Worker(Net):
                 if done:
                     s_raw = self.env.reset()  # Get initial state.
                     s = sess.run(self.preprocess,
-                                 feed_dict={self.frame: s_raw})
+                                 feed_dict={self.frame_in: s_raw})
 
                 exp_buffer, s, done = self.interact(sess, initial_obs=s)
 
@@ -290,18 +299,19 @@ class Worker(Net):
 if __name__ == "__main__":
     # Create global network and workers.
     master = Worker("global")
-    n_workers = multiprocessing.cpu_count()
+    n_workers = 1  # multiprocessing.cpu_count()
     team = []
     for i in range(n_workers):
-        team.append(Worker("marvin-entropy-fix2" + str(i)))
+        team.append(Worker("1t_full_epoch_2018-07-13" + str(i)))
 
     with tf.Session() as sess:
         coord = tf.train.Coordinator()
         sess.run(tf.global_variables_initializer())
         threads = []
         for worker in team:
-            worker_work = lambda: worker.work(sess, coord, 4e5)
-            t = threading.Thread(target=(worker_work))
+            t = threading.Thread(target=worker.work,
+                                 args=(sess, coord),
+                                 kwargs={"global_steps": max_global_steps})
             t.start()
             sleep(1)
             threads.append(t)
